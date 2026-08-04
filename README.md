@@ -64,6 +64,12 @@ API:
 
 Imported episodes appear as `HF_<repo>_<index>` in the episode list.
 
+## Data cleaning guide
+
+完整中文流程说明（质量检测 → 时间戳对齐 → 修复 → 导出）：
+
+- **[docs/data_cleaning_guide.md](docs/data_cleaning_guide.md)**
+
 ## Auto quality analysis (on load)
 
 Opening an episode (or the dataset list) runs [`backend/app/services/quality.py`](backend/app/services/quality.py):
