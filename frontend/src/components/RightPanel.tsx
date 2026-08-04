@@ -1,7 +1,54 @@
 "use client";
 
-import { ReferenceClock } from "@/lib/api";
+import { ReferenceClock, ScoreBreakdown } from "@/lib/api";
 import { useStudio } from "@/store/studio";
+
+const FALLBACK_DIMENSIONS: ScoreBreakdown["dimensions"] = [
+  {
+    id: "sync",
+    label: "Sync Alignment",
+    weight_pct: 35,
+    max_penalty: 35,
+    formula: "min(35, |sync_ms| × 0.35)",
+    explain: "Cross-sensor clock offset vs reference. Larger lag/jitter burns score fastest.",
+    penalty: 0,
+    kept: 35,
+    detail: "—",
+  },
+  {
+    id: "drop",
+    label: "Frame Continuity",
+    weight_pct: 20,
+    max_penalty: 20,
+    formula: "min(20, drop% × 2.5)",
+    explain: "RGB drop / missing-frame rate. Gaps break temporal training samples.",
+    penalty: 0,
+    kept: 20,
+    detail: "—",
+  },
+  {
+    id: "faults",
+    label: "Sensor Faults",
+    weight_pct: 37,
+    max_penalty: 37,
+    formula: "high×6 + medium×3 + (fail ? 15 : 0), capped at 37",
+    explain: "Blur, depth holes, force spikes, TCP jumps, and failed episodes.",
+    penalty: 0,
+    kept: 37,
+    detail: "—",
+  },
+  {
+    id: "label",
+    label: "Label Confidence",
+    weight_pct: 8,
+    max_penalty: 8,
+    formula: "−8 if confidence < 0.7, else 0",
+    explain: "Skill-segment auto-label trust. Low confidence needs manual review.",
+    penalty: 0,
+    kept: 8,
+    detail: "—",
+  },
+];
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -75,6 +122,8 @@ export function RightPanel() {
                 value={`${(episode.label_confidence * 100).toFixed(0)}%`}
               />
             </div>
+
+            <ScoreDimensionsCard breakdown={episode.quality_report?.score_breakdown} />
 
             <div
               className={`rounded border px-2 py-2 text-xs ${
@@ -424,6 +473,51 @@ function Metric({
       <div className="text-[10px] uppercase tracking-wide text-mute">{label}</div>
       <div className={`mt-1 text-lg font-semibold ${warn ? "text-warn" : "text-ink"}`}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+function ScoreDimensionsCard({ breakdown }: { breakdown?: ScoreBreakdown }) {
+  const dims = breakdown?.dimensions?.length ? breakdown.dimensions : FALLBACK_DIMENSIONS;
+  const note =
+    breakdown?.weights_note ||
+    "Weights are max penalty shares of the 100-point score (35+20+37+8).";
+
+  return (
+    <div className="rounded border border-line bg-bg p-2">
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-mute">
+        Quality score · 4 dimensions & weights
+      </div>
+      <p className="mb-2 text-[10px] text-mute">
+        Score starts at 100, then subtracts penalties. {note}
+      </p>
+      <div className="space-y-2">
+        {dims.map((d) => {
+          const keptPct = d.max_penalty > 0 ? (d.kept / d.max_penalty) * 100 : 100;
+          return (
+            <div key={d.id} className="rounded border border-line/70 px-2 py-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[11px] font-medium text-ink">{d.label}</span>
+                <span className="font-mono text-[10px] text-accent">{d.weight_pct}% weight</span>
+              </div>
+              <div className="mt-0.5 text-[10px] text-mute">{d.explain}</div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded bg-line/40">
+                <div
+                  className={`h-full ${d.penalty > 0 ? "bg-warn" : "bg-ok"}`}
+                  style={{ width: `${Math.max(4, keptPct)}%` }}
+                />
+              </div>
+              <div className="mt-1 flex flex-wrap justify-between gap-x-2 font-mono text-[10px] text-ink">
+                <span>
+                  −{d.penalty.toFixed(1)} / max −{d.max_penalty}
+                </span>
+                <span className="text-mute">{d.detail}</span>
+              </div>
+              <div className="mt-0.5 font-mono text-[9px] text-mute">{d.formula}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

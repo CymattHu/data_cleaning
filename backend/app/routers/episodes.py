@@ -55,6 +55,7 @@ def get_episode(episode_id: str):
             "analyzed": analysis.get("analyzed", False),
             "source": analysis.get("source", "unknown"),
             "decision_reasons": analysis.get("decision_reasons", []),
+            "score_breakdown": analysis.get("score_breakdown"),
             "sensor_stats": analysis.get("sensor_stats", {}),
             "blur_stats": analysis.get("blur_stats"),
             "thresholds": analysis.get("thresholds", {}),

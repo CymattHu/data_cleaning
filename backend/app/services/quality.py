@@ -178,27 +178,102 @@ def _detect_issues(
     return issues
 
 
+# Max penalty share of the 0–100 quality score (interview-facing weights)
+SCORE_DIMENSIONS = [
+    {
+        "id": "sync",
+        "label": "Sync Alignment",
+        "weight_pct": 35,
+        "max_penalty": 35.0,
+        "formula": "min(35, |sync_ms| × 0.35)",
+        "explain": "Cross-sensor clock offset vs reference. Larger lag/jitter burns score fastest.",
+    },
+    {
+        "id": "drop",
+        "label": "Frame Continuity",
+        "weight_pct": 20,
+        "max_penalty": 20.0,
+        "formula": "min(20, drop% × 2.5)",
+        "explain": "RGB drop / missing-frame rate. Gaps break temporal training samples.",
+    },
+    {
+        "id": "faults",
+        "label": "Sensor Faults",
+        "weight_pct": 37,
+        "max_penalty": 37.0,
+        "formula": "high×6 + medium×3 + (fail ? 15 : 0), capped at 37",
+        "explain": "Blur, depth holes, force spikes, TCP jumps, and failed episodes.",
+    },
+    {
+        "id": "label",
+        "label": "Label Confidence",
+        "weight_pct": 8,
+        "max_penalty": 8.0,
+        "formula": "−8 if confidence < 0.7, else 0",
+        "explain": "Skill-segment auto-label trust. Low confidence needs manual review.",
+    },
+]
+
+
+def _score_breakdown(
+    sync_ms: float,
+    drop_pct: float,
+    issues: list[dict[str, Any]],
+    label_conf: float,
+    success: bool | None,
+) -> dict[str, Any]:
+    high = sum(1 for i in issues if i.get("severity") == "high")
+    medium = sum(1 for i in issues if i.get("severity") == "medium")
+
+    sync_pen = min(35.0, abs(sync_ms) * 0.35)
+    drop_pen = min(20.0, drop_pct * 2.5)
+    fault_pen = min(37.0, high * 6.0 + medium * 3.0 + (15.0 if success is False else 0.0))
+    label_pen = 8.0 if label_conf < 0.7 else 0.0
+
+    score = float(max(0.0, min(100.0, round(100.0 - sync_pen - drop_pen - fault_pen - label_pen, 1))))
+
+    dims = []
+    for base, pen, detail in (
+        (SCORE_DIMENSIONS[0], sync_pen, f"|sync|={abs(sync_ms):.1f} ms"),
+        (SCORE_DIMENSIONS[1], drop_pen, f"drop={drop_pct:.1f}%"),
+        (
+            SCORE_DIMENSIONS[2],
+            fault_pen,
+            f"high={high}, medium={medium}"
+            + (", task_fail" if success is False else ""),
+        ),
+        (SCORE_DIMENSIONS[3], label_pen, f"conf={label_conf:.2f}"),
+    ):
+        dims.append(
+            {
+                **base,
+                "penalty": round(pen, 1),
+                "kept": round(base["max_penalty"] - pen, 1),
+                "detail": detail,
+            }
+        )
+
+    return {
+        "score": score,
+        "base": 100.0,
+        "dimensions": dims,
+        "weights_note": "Weights are max penalty shares of the 100-point score (35+20+37+8).",
+        "high_issues": high,
+        "medium_issues": medium,
+    }
+
+
 def _score_and_decide(
     sync_ms: float,
     drop_pct: float,
     issues: list[dict[str, Any]],
     label_conf: float,
     success: bool | None,
-) -> tuple[float, Status, list[str]]:
-    high = sum(1 for i in issues if i.get("severity") == "high")
-    medium = sum(1 for i in issues if i.get("severity") == "medium")
-
-    # Quality score 0-100
-    score = 100.0
-    score -= min(35.0, abs(sync_ms) * 0.35)
-    score -= min(20.0, drop_pct * 2.5)
-    score -= high * 6.0
-    score -= medium * 3.0
-    if success is False:
-        score -= 15.0
-    if label_conf < 0.7:
-        score -= 8.0
-    score = float(max(0.0, min(100.0, round(score, 1))))
+) -> tuple[float, Status, list[str], dict[str, Any]]:
+    breakdown = _score_breakdown(sync_ms, drop_pct, issues, label_conf, success)
+    score = float(breakdown["score"])
+    high = int(breakdown["high_issues"])
+    medium = int(breakdown["medium_issues"])
 
     reasons: list[str] = []
     status: Status = "pass"
@@ -251,15 +326,15 @@ def _score_and_decide(
         status = "reject"
         reasons.append(f"Quality score {score:.0f} < 40")
 
-    return score, status, reasons
+    return score, status, reasons, breakdown
 
 
 def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, Any]:
     """Analyze episode from parquet/tables. Results are cached in store."""
     if not force_refresh and episode_id in store.analysis_cache:
         cached = store.analysis_cache[episode_id]
-        # Older cache entries may predate blur_stats — recompute once
-        if "blur_stats" not in cached:
+        # Older cache entries may predate new report fields — recompute once
+        if "blur_stats" not in cached or "score_breakdown" not in cached:
             store.analysis_cache.pop(episode_id, None)
             return analyze_episode(episode_id, force_refresh=True)
         # Refresh sync display if aligned
@@ -274,7 +349,7 @@ def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, A
                 "average_sync_error_ms": 5.0,
             }
             # Re-decide with improved sync after alignment
-            score, status, reasons = _score_and_decide(
+            score, status, reasons, breakdown = _score_and_decide(
                 5.0,
                 out["dropped_frames_pct"],
                 out["issues"],
@@ -283,9 +358,12 @@ def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, A
             )
             # Alignment improves score a bit but issues remain
             score = min(100.0, score + 6)
+            breakdown = dict(breakdown)
+            breakdown["score"] = score
             out["quality_score"] = score
             out["status"] = status
             out["decision_reasons"] = reasons + ["Alignment applied (sync residual ~5 ms)"]
+            out["score_breakdown"] = breakdown
             out["analyzed"] = True
             out["source"] = "auto_on_load+aligned"
             return out
@@ -306,20 +384,27 @@ def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, A
         tcp = store.load_table(episode_id, "tcp_pose")
     except FileNotFoundError:
         # Fall back to metadata-only
+        fb_sync = float(meta.get("sync_error_ms", 48))
+        fb_drop = float(meta.get("dropped_frames_pct", 0))
+        fb_issues = meta.get("issues", [])
+        _, _, _, fb_breakdown = _score_and_decide(
+            fb_sync, fb_drop, fb_issues, label_conf, success
+        )
         result = {
             "episode_id": episode_id,
             "analyzed": False,
             "source": "metadata_fallback",
             "status": meta.get("status", "review"),
             "quality_score": float(meta.get("quality_score", 50)),
-            "sync_error_ms": float(meta.get("sync_error_ms", 48)),
-            "dropped_frames_pct": float(meta.get("dropped_frames_pct", 0)),
+            "sync_error_ms": fb_sync,
+            "dropped_frames_pct": fb_drop,
             "label_confidence": label_conf,
             "success": success,
             "offsets": meta.get("offsets", {}),
-            "issues": meta.get("issues", []),
+            "issues": fb_issues,
             "sensor_stats": {},
             "decision_reasons": ["No sensor tables found; used metadata fallback"],
+            "score_breakdown": fb_breakdown,
             "thresholds": THRESHOLDS,
         }
         store.analysis_cache[episode_id] = result
@@ -356,7 +441,9 @@ def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, A
     if override is not None and not force_refresh:
         issues = override
 
-    score, status, reasons = _score_and_decide(sync_ms, drop_pct, issues, label_conf, success)
+    score, status, reasons, breakdown = _score_and_decide(
+        sync_ms, drop_pct, issues, label_conf, success
+    )
 
     blur_threshold = float(THRESHOLDS["blur_laplacian"])
     blur_stats: dict[str, Any] = {
@@ -445,6 +532,7 @@ def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, A
         "sensor_stats": sensor_stats,
         "blur_stats": blur_stats,
         "decision_reasons": reasons,
+        "score_breakdown": breakdown,
         "thresholds": THRESHOLDS,
         "issue_count": len(issues),
     }

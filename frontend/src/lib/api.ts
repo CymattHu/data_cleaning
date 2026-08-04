@@ -70,10 +70,32 @@ export type BlurStats = {
   worst_t: number | null;
 };
 
+export type ScoreDimension = {
+  id: string;
+  label: string;
+  weight_pct: number;
+  max_penalty: number;
+  formula: string;
+  explain: string;
+  penalty: number;
+  kept: number;
+  detail: string;
+};
+
+export type ScoreBreakdown = {
+  score: number;
+  base: number;
+  dimensions: ScoreDimension[];
+  weights_note: string;
+  high_issues: number;
+  medium_issues: number;
+};
+
 export type QualityReport = {
   analyzed: boolean;
   source: string;
   decision_reasons: string[];
+  score_breakdown?: ScoreBreakdown;
   sensor_stats: Record<
     string,
     {
