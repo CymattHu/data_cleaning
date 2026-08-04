@@ -68,15 +68,24 @@ class EpisodeStore:
 
     def __init__(self) -> None:
         self.alignment_applied: dict[str, bool] = {}
+        self.alignment_reports: dict[str, dict[str, Any]] = {}
         self.cleaned: dict[str, bool] = {}
+        self.clean_reports: dict[str, dict[str, Any]] = {}
         self.labels_override: dict[str, list[dict[str, Any]]] = {}
         self.issues_override: dict[str, list[dict[str, Any]]] = {}
+        self.issues_detected: dict[str, list[dict[str, Any]]] = {}
         self.quality_override: dict[str, float] = {}
         self.analysis_cache: dict[str, dict[str, Any]] = {}
         self.sync_settings: dict[str, dict[str, Any]] = {}
         self.exports: list[dict[str, Any]] = []
         self.dataset_version = "v1.1"
         self._cache: dict[str, Any] = {}
+
+    def get_alignment_report(self, episode_id: str) -> dict[str, Any] | None:
+        return self.alignment_reports.get(episode_id)
+
+    def get_clean_report(self, episode_id: str) -> dict[str, Any] | None:
+        return self.clean_reports.get(episode_id)
 
     def get_sync_settings(self, episode_id: str) -> dict[str, Any]:
         return self.sync_settings.get(

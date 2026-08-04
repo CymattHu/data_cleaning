@@ -68,6 +68,8 @@ def get_episode(episode_id: str):
             "has_data": store.has_full_data(episode_id),
         },
         "sync_settings": sync_settings,
+        "alignment_report": store.get_alignment_report(episode_id),
+        "clean_report": store.get_clean_report(episode_id),
     }
 
 
@@ -128,13 +130,7 @@ def post_estimate(episode_id: str, body: EstimateOffsetRequest | None = None):
 
 @router.post("/episodes/{episode_id}/clean")
 def post_clean(episode_id: str):
-    result = clean_episode(episode_id)
-    store.analysis_cache.pop(episode_id, None)
-    analysis = analyze_episode(episode_id, force_refresh=True)
-    result["status"] = analysis["status"]
-    result["quality_score"] = analysis["quality_score"]
-    result["decision_reasons"] = analysis["decision_reasons"]
-    return result
+    return clean_episode(episode_id)
 
 
 @router.get("/episodes/{episode_id}/labels")

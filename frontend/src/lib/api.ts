@@ -55,6 +55,23 @@ export type Issue = {
   message: string;
   severity: string;
   action: string;
+  status?: string;
+  resolved_by?: string;
+};
+
+export type CleanReport = {
+  applied: boolean;
+  detected: number;
+  resolved: number;
+  remaining: number;
+  actions: string[];
+  resolved_issues: Issue[];
+  remaining_issues: Issue[];
+  before_quality_score: number;
+  after_quality_score: number;
+  before_status?: string;
+  after_status?: string;
+  note: string;
 };
 
 export type BlurStats = {
@@ -120,13 +137,7 @@ export type EpisodeDetail = {
   label_confidence: number;
   success?: boolean;
   duration_s: number;
-  offsets: {
-    reference_clock: string;
-    rgb_ms: number;
-    depth_ms: number;
-    ft_ms: number;
-    average_sync_error_ms: number;
-  };
+  offsets: SyncOffsets;
   issues: Issue[];
   labels: SkillSegment[];
   quality_report?: QualityReport;
@@ -135,6 +146,8 @@ export type EpisodeDetail = {
     reference_clock: string;
     target_rate_hz: number;
   };
+  alignment_report?: AlignmentReport | null;
+  clean_report?: CleanReport | null;
 };
 
 export type ReferenceClock =
@@ -149,11 +162,36 @@ export type SyncSettings = {
   target_rate_hz: number;
 };
 
+export type SyncOffsets = {
+  reference_clock: string;
+  rgb_ms: number;
+  depth_ms: number;
+  ft_ms: number;
+  joint_ms?: number;
+  average_sync_error_ms: number;
+};
+
+export type AlignmentReport = {
+  applied: boolean;
+  before_sync_error_ms: number;
+  after_sync_error_ms: number;
+  pre_offsets: SyncOffsets;
+  post_offsets: SyncOffsets;
+  reference_clock: string;
+  target_rate_hz: number;
+  methods: Record<string, string>;
+  changes: string[];
+};
+
 export type TimelineResponse = {
   episode_id: string;
   mode: "raw" | "aligned";
   duration_s: number;
   current_sync_error_ms: number;
+  before_sync_error_ms?: number;
+  after_sync_error_ms?: number | null;
+  alignment_applied?: boolean;
+  alignment_report?: AlignmentReport | null;
   sensors: Record<string, { t: number; present: boolean }[]>;
   force_series: { t: number; fz: number }[];
   tcp_series: { t: number; x: number; y: number; z: number }[];
@@ -209,8 +247,11 @@ export const api = {
       before_sync_error_ms: number;
       after_sync_error_ms: number;
       offsets: EpisodeDetail["offsets"];
+      pre_offsets: SyncOffsets;
       reference_clock: string;
       target_rate_hz: number;
+      changes: string[];
+      alignment_report: AlignmentReport;
     }>(`/episodes/${id}/align`, {
       method: "POST",
       body: JSON.stringify({
@@ -226,10 +267,15 @@ export const api = {
       }),
     }),
   clean: (id: string) =>
-    request<{ issues: Issue[]; quality_score: number; dropped_frames_pct: number }>(
-      `/episodes/${id}/clean`,
-      { method: "POST", body: "{}" }
-    ),
+    request<{
+      issues: Issue[];
+      resolved_issues: Issue[];
+      quality_score: number;
+      dropped_frames_pct: number;
+      status: string;
+      decision_reasons: string[];
+      clean_report: CleanReport;
+    }>(`/episodes/${id}/clean`, { method: "POST", body: "{}" }),
   analyze: (id: string) =>
     request<Record<string, unknown>>(`/episodes/${id}/analyze`, {
       method: "POST",

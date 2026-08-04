@@ -49,5 +49,9 @@ def lerobot_import(body: LeRobotImportRequest):
         store.issues_override.pop(ep["episode_id"], None)
         store.quality_override.pop(ep["episode_id"], None)
         store.alignment_applied.pop(ep["episode_id"], None)
+        store.alignment_reports.pop(ep["episode_id"], None)
+        store.cleaned.pop(ep["episode_id"], None)
+        store.clean_reports.pop(ep["episode_id"], None)
+        store.issues_detected.pop(ep["episode_id"], None)
 
     return result

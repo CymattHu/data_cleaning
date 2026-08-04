@@ -277,17 +277,26 @@ export const useStudio = create<StudioState>((set, get) => ({
     });
     set({ alignmentApplied: true, timelineMode: "aligned" });
     await get().refreshEpisode();
+    // Prefer Aligned view after apply; Raw Timeline remains for before/after compare
+    await get().setTimelineMode("aligned");
     set({
-      status: `Aligned @ ${result.target_rate_hz} Hz: ${result.before_sync_error_ms.toFixed(0)} → ${result.after_sync_error_ms.toFixed(0)} ms`,
+      status: `Aligned @ ${result.target_rate_hz} Hz: ${result.before_sync_error_ms.toFixed(0)} → ${result.after_sync_error_ms.toFixed(0)} ms · toggle Raw to compare`,
+      activeTab: "sync",
     });
   },
 
   runClean: async () => {
-    set({ status: "Running quality clean…", activeTab: "quality" });
-    await api.clean(get().selectedEpisodeId);
+    set({ status: "Detecting & cleaning issues…", activeTab: "quality" });
+    const result = await api.clean(get().selectedEpisodeId);
     set({ cleaned: true });
     await get().refreshEpisode();
-    set({ status: "Quality issues detected", activeTab: "quality" });
+    const report = result.clean_report;
+    set({
+      status: report
+        ? `Cleaned ${report.resolved}/${report.detected} · score ${report.before_quality_score.toFixed(0)} → ${report.after_quality_score.toFixed(0)} · ${report.remaining} left`
+        : "Quality clean complete",
+      activeTab: "quality",
+    });
   },
 
   runPipeline: async () => {

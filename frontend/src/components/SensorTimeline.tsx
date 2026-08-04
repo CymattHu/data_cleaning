@@ -221,30 +221,46 @@ export function SensorTimeline() {
           <span className="rounded bg-bg px-2 py-0.5 text-warn">
             Sync Error: {(timeline?.current_sync_error_ms ?? 0).toFixed(1)} ms
           </span>
-          {alignmentApplied && timelineMode === "aligned" && (
-            <span className="text-ok">After Alignment: ~5 ms</span>
+          {alignmentApplied && (
+            <span className="text-[11px] text-mute">
+              {timelineMode === "aligned" ? (
+                <span className="text-ok">
+                  Aligned view · {(timeline?.after_sync_error_ms ?? timeline?.current_sync_error_ms ?? 5).toFixed(0)}{" "}
+                  ms
+                </span>
+              ) : (
+                <span className="text-warn">
+                  Raw (pre-align) · {(timeline?.before_sync_error_ms ?? 48).toFixed(0)} ms
+                </span>
+              )}
+            </span>
           )}
-          {timelineMode === "raw" && (
-            <span className="text-warn">Before Alignment: ~48 ms</span>
+          {!alignmentApplied && timelineMode === "raw" && (
+            <span className="text-warn">Unaligned</span>
           )}
         </div>
-        <div className="flex rounded border border-line text-xs">
-          <button
-            type="button"
-            onClick={() => void setTimelineMode("raw")}
-            className={`px-2.5 py-1 ${timelineMode === "raw" ? "bg-accent text-bg" : "text-mute"}`}
-          >
-            Raw Timeline
-          </button>
-          <button
-            type="button"
-            onClick={() => void setTimelineMode("aligned")}
-            className={`px-2.5 py-1 ${
-              timelineMode === "aligned" ? "bg-accent text-bg" : "text-mute"
-            }`}
-          >
-            Aligned Timeline
-          </button>
+        <div className="flex items-center gap-2">
+          {alignmentApplied && (
+            <span className="hidden text-[10px] text-mute sm:inline">对比未对齐 ↔ 已对齐</span>
+          )}
+          <div className="flex rounded border border-line text-xs">
+            <button
+              type="button"
+              onClick={() => void setTimelineMode("raw")}
+              className={`px-2.5 py-1 ${timelineMode === "raw" ? "bg-accent text-bg" : "text-mute"}`}
+            >
+              Raw Timeline
+            </button>
+            <button
+              type="button"
+              onClick={() => void setTimelineMode("aligned")}
+              className={`px-2.5 py-1 ${
+                timelineMode === "aligned" ? "bg-accent text-bg" : "text-mute"
+              }`}
+            >
+              Aligned Timeline
+            </button>
+          </div>
         </div>
       </div>
       <div className="legend flex flex-wrap gap-3 px-3 pt-2 text-[10px] text-mute">

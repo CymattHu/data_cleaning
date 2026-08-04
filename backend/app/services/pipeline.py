@@ -136,32 +136,73 @@ def align_episode(episode_id: str, req: dict[str, Any]) -> dict[str, Any]:
         reference_clock=reference_clock,
         target_rate_hz=target_rate_hz,
     )
-    before = store.sync_error(episode_id)
-    offsets = estimate_offsets(episode_id, reference_clock=reference_clock)
+    # Always re-estimate from on-disk raw tables (alignment never mutates parquet/mp4).
+    # Clicking Apply twice only refreshes the in-memory view/report; original data remains.
+    pre_offsets = estimate_offsets(episode_id, reference_clock=reference_clock)
+    try:
+        meta_sync = float(store.load_metadata(episode_id).get("sync_error_ms", 0))
+    except FileNotFoundError:
+        meta_sync = 0.0
+    before = meta_sync or float(pre_offsets.get("average_sync_error_ms", 48.0))
     store.alignment_applied[episode_id] = True
     # Residual sync error after alignment (demo: small nonzero)
-    after = 5.0 if abs(offsets.get("average_sync_error_ms", 0)) > 1 else 0.5
+    after = 5.0 if abs(float(pre_offsets.get("average_sync_error_ms", 0))) > 1 else 0.5
+    post_offsets = {
+        **pre_offsets,
+        "rgb_ms": 0.0,
+        "depth_ms": 0.0,
+        "ft_ms": 0.0,
+        "joint_ms": 0.0,
+        "average_sync_error_ms": after,
+    }
+    methods = {
+        "rgb": req.get("rgb_method", "nearest"),
+        "joint": req.get("joint_method", "linear"),
+        "tcp": req.get("tcp_method", "slerp"),
+        "force": req.get("force_method", "lowpass"),
+        "event": req.get("event_method", "zoh"),
+    }
+
+    def _fmt(ms: float) -> str:
+        return f"{ms:+.0f}" if ms != 0 else "0"
+
+    changes = [
+        f"Reference clock → {reference_clock}",
+        f"Target rate → {target_rate_hz:g} Hz (playback resampled)",
+        f"Sync error {_fmt(before)} → {_fmt(after)} ms",
+        f"RGB time shift {_fmt(float(pre_offsets.get('rgb_ms', 0)))} → 0 ms",
+        f"Depth time shift {_fmt(float(pre_offsets.get('depth_ms', 0)))} → 0 ms",
+        f"Force/Torque time shift {_fmt(float(pre_offsets.get('ft_ms', 0)))} → 0 ms",
+        (
+            "Resample methods: "
+            f"RGB {methods['rgb']} · Joint {methods['joint']} · "
+            f"TCP {methods['tcp']} · Force {methods['force']} · Event {methods['event']}"
+        ),
+        "Raw Timeline still available for before/after comparison",
+    ]
+    report = {
+        "applied": True,
+        "before_sync_error_ms": before,
+        "after_sync_error_ms": after,
+        "pre_offsets": pre_offsets,
+        "post_offsets": post_offsets,
+        "reference_clock": settings["reference_clock"],
+        "target_rate_hz": settings["target_rate_hz"],
+        "methods": methods,
+        "changes": changes,
+    }
+    store.alignment_reports[episode_id] = report
     return {
         "episode_id": episode_id,
         "before_sync_error_ms": before,
         "after_sync_error_ms": after,
-        "offsets": {
-            **offsets,
-            "rgb_ms": 0.0,
-            "depth_ms": 0.0,
-            "ft_ms": 0.0,
-            "joint_ms": 0.0,
-            "average_sync_error_ms": after,
-        },
+        "offsets": post_offsets,
+        "pre_offsets": pre_offsets,
         "reference_clock": settings["reference_clock"],
         "target_rate_hz": settings["target_rate_hz"],
-        "methods": {
-            "rgb": req.get("rgb_method", "nearest"),
-            "joint": req.get("joint_method", "linear"),
-            "tcp": req.get("tcp_method", "slerp"),
-            "force": req.get("force_method", "lowpass"),
-            "event": req.get("event_method", "zoh"),
-        },
+        "methods": methods,
+        "changes": changes,
+        "alignment_report": report,
     }
 
 
@@ -240,22 +281,111 @@ def detect_issues(episode_id: str) -> list[dict[str, Any]]:
     return issues
 
 
-def clean_episode(episode_id: str) -> dict[str, Any]:
-    # Prefer auto-detected issues from quality analyzer
-    from .quality import analyze_episode
+# Actions the demo can auto-apply; Reject / Needs Review stay for human review
+_AUTO_CLEANABLE_ACTIONS = {"Interpolate", "Repair", "Trim", "Keep"}
 
+
+def clean_episode(episode_id: str) -> dict[str, Any]:
+    """Detect issues, auto-resolve cleanable ones, keep residual for review."""
+    from .quality import _score_and_decide, analyze_episode
+
+    # Fresh detect from sensors (ignore prior clean override)
+    store.issues_override.pop(episode_id, None)
     store.analysis_cache.pop(episode_id, None)
     analysis = analyze_episode(episode_id, force_refresh=True)
-    issues = analysis.get("issues") or detect_issues(episode_id)
-    store.issues_override[episode_id] = issues
+    detected = [dict(i) for i in (analysis.get("issues") or detect_issues(episode_id))]
+    store.issues_detected[episode_id] = detected
+
+    resolved: list[dict[str, Any]] = []
+    remaining: list[dict[str, Any]] = []
+    actions: list[str] = []
+    for issue in detected:
+        action = str(issue.get("action", ""))
+        if action in _AUTO_CLEANABLE_ACTIONS:
+            fixed = {
+                **issue,
+                "status": "resolved",
+                "resolved_by": action,
+            }
+            resolved.append(fixed)
+            actions.append(
+                f"{action}: {issue.get('message', issue.get('type'))} @ {float(issue.get('t', 0)):.2f}s"
+            )
+        else:
+            remaining.append(issue)
+
+    store.issues_override[episode_id] = remaining
     store.cleaned[episode_id] = True
+
+    sync_ms = float(analysis.get("sync_error_ms", 48))
+    if store.alignment_applied.get(episode_id):
+        sync_ms = float(
+            (store.get_alignment_report(episode_id) or {}).get("after_sync_error_ms", 5.0)
+        )
+    drop_pct = float(analysis.get("dropped_frames_pct", 0))
+    # Interpolated drops no longer count fully against continuity
+    if any(i.get("type") == "drop" for i in resolved):
+        drop_pct = round(drop_pct * 0.25, 2)
+
+    score, status, reasons, breakdown = _score_and_decide(
+        sync_ms,
+        drop_pct,
+        remaining,
+        float(analysis.get("label_confidence", 0.88)),
+        analysis.get("success"),
+    )
+    # Cleaning recoverable faults improves score a bit in the demo narrative
+    score = float(min(100.0, score + min(8.0, len(resolved) * 2.5)))
+    breakdown = dict(breakdown)
+    breakdown["score"] = score
+
+    report = {
+        "applied": True,
+        "detected": len(detected),
+        "resolved": len(resolved),
+        "remaining": len(remaining),
+        "actions": actions,
+        "resolved_issues": resolved,
+        "remaining_issues": remaining,
+        "before_quality_score": float(analysis.get("quality_score", 0)),
+        "after_quality_score": score,
+        "before_status": analysis.get("status"),
+        "after_status": status,
+        "note": (
+            "Auto-clean applies Interpolate / Repair / Trim / Keep. "
+            "Reject and Needs Review stay for manual review."
+        ),
+    }
+    store.clean_reports[episode_id] = report
+    store.quality_override[episode_id] = score
+
+    # Patch analysis cache so Overview / timeline reflect cleaned state
+    cached = dict(analysis)
+    cached.update(
+        {
+            "issues": remaining,
+            "quality_score": score,
+            "status": status,
+            "decision_reasons": reasons
+            + ([f"Auto-cleaned {len(resolved)} issue(s)"] if resolved else []),
+            "score_breakdown": breakdown,
+            "dropped_frames_pct": drop_pct,
+            "sync_error_ms": sync_ms,
+            "source": "auto_on_load+cleaned",
+            "clean_report": report,
+        }
+    )
+    store.analysis_cache[episode_id] = cached
+
     return {
         "episode_id": episode_id,
-        "issues": issues,
-        "quality_score": analysis["quality_score"],
-        "dropped_frames_pct": analysis["dropped_frames_pct"],
-        "status": analysis["status"],
-        "decision_reasons": analysis.get("decision_reasons", []),
+        "issues": remaining,
+        "resolved_issues": resolved,
+        "quality_score": score,
+        "dropped_frames_pct": drop_pct,
+        "status": status,
+        "decision_reasons": cached["decision_reasons"],
+        "clean_report": report,
     }
 
 
@@ -266,7 +396,15 @@ def build_timeline(episode_id: str, mode: str) -> dict[str, Any]:
     # If user asks aligned but hasn't applied, still show corrected offsets visually when mode=aligned
     use_correction = mode == "aligned"
 
-    offsets = meta.get("offsets", estimate_offsets(episode_id))
+    sync_settings = store.get_sync_settings(episode_id)
+    report = store.get_alignment_report(episode_id)
+    if report and report.get("pre_offsets"):
+        offsets = report["pre_offsets"]
+    else:
+        offsets = estimate_offsets(
+            episode_id,
+            reference_clock=sync_settings.get("reference_clock", "joint_state"),
+        )
     rgb_off = 0.0 if use_correction else float(offsets.get("rgb_ms", 48)) / 1000.0
     depth_off = 0.0 if use_correction else float(offsets.get("depth_ms", 55)) / 1000.0
     ft_off = 0.0 if use_correction else float(offsets.get("ft_ms", -8)) / 1000.0
@@ -399,20 +537,29 @@ def build_timeline(episode_id: str, mode: str) -> dict[str, Any]:
             }
         )
 
-    sync_err = 5.0 if (aligned or use_correction and store.alignment_applied.get(episode_id)) else float(
-        meta.get("sync_error_ms", 48)
+    before_err = float(
+        (report or {}).get("before_sync_error_ms")
+        or offsets.get("average_sync_error_ms")
+        or meta.get("sync_error_ms", 48)
     )
+    after_err = float((report or {}).get("after_sync_error_ms") or 5.0)
     if use_correction:
-        sync_err = 5.0 if store.alignment_applied.get(episode_id) else float(meta.get("sync_error_ms", 48)) * 0.15
+        sync_err = after_err if store.alignment_applied.get(episode_id) else before_err * 0.15
         if not store.alignment_applied.get(episode_id):
             # Preview aligned timeline even before apply for demo clarity
-            sync_err = 5.0
+            sync_err = after_err
+    else:
+        sync_err = before_err
 
     return {
         "episode_id": episode_id,
         "mode": "aligned" if use_correction else "raw",
         "duration_s": duration,
         "current_sync_error_ms": sync_err,
+        "before_sync_error_ms": before_err,
+        "after_sync_error_ms": after_err if store.alignment_applied.get(episode_id) else None,
+        "alignment_applied": bool(store.alignment_applied.get(episode_id)),
+        "alignment_report": report,
         "sensors": sensors,
         "force_series": force_series,
         "tcp_series": tcp_series,

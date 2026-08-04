@@ -436,9 +436,9 @@ def analyze_episode(episode_id: str, force_refresh: bool = False) -> dict[str, A
     drop_pct = _drop_rate_pct(rgb_t, expected_rgb)
 
     issues = _detect_issues(episode_id, rgb, depth, force, tcp, expected_rgb)
-    # Keep any manual overrides if already cleaned and user hasn't forced
+    # After clean, keep the residual issue list even on refresh
     override = store.issues_override.get(episode_id)
-    if override is not None and not force_refresh:
+    if override is not None and (not force_refresh or store.cleaned.get(episode_id)):
         issues = override
 
     score, status, reasons, breakdown = _score_and_decide(

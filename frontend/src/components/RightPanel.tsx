@@ -1,6 +1,6 @@
 "use client";
 
-import { ReferenceClock, ScoreBreakdown } from "@/lib/api";
+import { AlignmentReport, ReferenceClock, ScoreBreakdown } from "@/lib/api";
 import { useStudio } from "@/store/studio";
 
 const FALLBACK_DIMENSIONS: ScoreBreakdown["dimensions"] = [
@@ -86,6 +86,8 @@ export function RightPanel() {
     targetRateHz,
     setReferenceClock,
     setTargetRateHz,
+    timelineMode,
+    setTimelineMode,
   } = useStudio();
 
   return (
@@ -284,15 +286,29 @@ export function RightPanel() {
               </div>
             </div>
 
-            <Row
-              label="RGB Offset"
-              value={`${episode.offsets.rgb_ms >= 0 ? "+" : ""}${episode.offsets.rgb_ms.toFixed(0)} ms`}
-            />
-            <Row
-              label="Depth Offset"
-              value={`${episode.offsets.depth_ms >= 0 ? "+" : ""}${episode.offsets.depth_ms.toFixed(0)} ms`}
-            />
-            <Row label="FT Offset" value={`${episode.offsets.ft_ms.toFixed(0)} ms`} />
+            {episode.alignment_report ? (
+              <AlignmentCompareCard
+                report={episode.alignment_report}
+                onShowRaw={() => void setTimelineMode("raw")}
+                onShowAligned={() => void setTimelineMode("aligned")}
+                timelineMode={timelineMode}
+              />
+            ) : (
+              <>
+                <Row
+                  label="RGB Offset"
+                  value={`${episode.offsets.rgb_ms >= 0 ? "+" : ""}${episode.offsets.rgb_ms.toFixed(0)} ms`}
+                />
+                <Row
+                  label="Depth Offset"
+                  value={`${episode.offsets.depth_ms >= 0 ? "+" : ""}${episode.offsets.depth_ms.toFixed(0)} ms`}
+                />
+                <Row
+                  label="FT Offset"
+                  value={`${episode.offsets.ft_ms >= 0 ? "+" : ""}${episode.offsets.ft_ms.toFixed(0)} ms`}
+                />
+              </>
+            )}
             <div className="rounded border border-line bg-bg p-2 text-[11px] text-mute">
               Methods: RGB Nearest · Joint Linear · TCP SLERP · Force Lowpass · Event ZOH
             </div>
@@ -343,8 +359,43 @@ export function RightPanel() {
             >
               Detect / Clean Issues
             </button>
+
+            {episode.clean_report?.applied && (
+              <div className="rounded border border-ok/40 bg-ok/5 p-2 text-[11px] text-ink">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-ok">
+                  Clean applied
+                </div>
+                <div className="font-mono text-[10px]">
+                  {episode.clean_report.resolved}/{episode.clean_report.detected} resolved ·{" "}
+                  {episode.clean_report.remaining} remaining
+                </div>
+                <div className="mt-1 font-mono text-[10px]">
+                  Score {episode.clean_report.before_quality_score.toFixed(0)} →{" "}
+                  {episode.clean_report.after_quality_score.toFixed(0)} · status{" "}
+                  {episode.clean_report.before_status} → {episode.clean_report.after_status}
+                </div>
+                {episode.clean_report.actions.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-[10px]">
+                    {episode.clean_report.actions.map((a) => (
+                      <li key={a} className="text-ok">
+                        ✓ {a}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-2 text-[10px] text-mute">{episode.clean_report.note}</p>
+              </div>
+            )}
+
+            <div className="text-[10px] uppercase tracking-wide text-mute">
+              Remaining issues ({episode.issues.length})
+            </div>
             {episode.issues.length === 0 && (
-              <p className="text-xs text-mute">No issues flagged. Blurriness stats are still shown above.</p>
+              <p className="text-xs text-mute">
+                {episode.clean_report?.applied
+                  ? "All cleanable issues resolved. Nothing left for review."
+                  : "No issues flagged yet. Run Detect / Clean Issues."}
+              </p>
             )}
             {episode.issues.map((issue) => (
               <button
@@ -354,14 +405,34 @@ export function RightPanel() {
                 className="block w-full rounded border border-line bg-bg px-2 py-2 text-left hover:border-accent"
               >
                 <div className="flex justify-between text-xs">
-                  <span className="font-mono text-accent">
-                    {formatTs(issue.t)}
-                  </span>
-                  <span className="text-mute">{issue.action}</span>
+                  <span className="font-mono text-accent">{formatTs(issue.t)}</span>
+                  <span className="text-warn">{issue.action}</span>
                 </div>
                 <div className="mt-1 text-xs text-ink">{issue.message}</div>
               </button>
             ))}
+
+            {episode.clean_report?.resolved_issues?.length ? (
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-wide text-mute">
+                  Resolved ({episode.clean_report.resolved_issues.length})
+                </div>
+                {episode.clean_report.resolved_issues.map((issue) => (
+                  <button
+                    key={`resolved-${issue.t}-${issue.type}`}
+                    type="button"
+                    onClick={() => setCurrentTime(issue.t)}
+                    className="block w-full rounded border border-ok/30 bg-bg px-2 py-1.5 text-left opacity-80 hover:border-ok"
+                  >
+                    <div className="flex justify-between text-[11px]">
+                      <span className="font-mono text-mute">{formatTs(issue.t)}</span>
+                      <span className="text-ok">{issue.resolved_by || issue.action}</span>
+                    </div>
+                    <div className="text-[11px] text-mute line-through">{issue.message}</div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -473,6 +544,90 @@ function Metric({
       <div className="text-[10px] uppercase tracking-wide text-mute">{label}</div>
       <div className={`mt-1 text-lg font-semibold ${warn ? "text-warn" : "text-ink"}`}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+function fmtMs(ms: number) {
+  const sign = ms > 0 ? "+" : "";
+  return `${sign}${ms.toFixed(0)} ms`;
+}
+
+function AlignmentCompareCard({
+  report,
+  onShowRaw,
+  onShowAligned,
+  timelineMode,
+}: {
+  report: AlignmentReport;
+  onShowRaw: () => void;
+  onShowAligned: () => void;
+  timelineMode: "raw" | "aligned";
+}) {
+  const pre = report.pre_offsets;
+  const post = report.post_offsets;
+  return (
+    <div className="space-y-2 rounded border border-ok/40 bg-ok/5 p-2">
+      <div className="text-[10px] uppercase tracking-wide text-ok">
+        Alignment applied · before / after
+      </div>
+      <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 gap-y-1 font-mono text-[10px] text-ink">
+        <span className="text-mute">Metric</span>
+        <span className="text-mute">Raw</span>
+        <span className="text-mute">Aligned</span>
+        <span>Sync error</span>
+        <span className="text-warn">{report.before_sync_error_ms.toFixed(0)} ms</span>
+        <span className="text-ok">{report.after_sync_error_ms.toFixed(0)} ms</span>
+        <span>RGB offset</span>
+        <span className="text-warn">{fmtMs(pre.rgb_ms)}</span>
+        <span className="text-ok">{fmtMs(post.rgb_ms)}</span>
+        <span>Depth offset</span>
+        <span className="text-warn">{fmtMs(pre.depth_ms)}</span>
+        <span className="text-ok">{fmtMs(post.depth_ms)}</span>
+        <span>FT offset</span>
+        <span className="text-warn">{fmtMs(pre.ft_ms)}</span>
+        <span className="text-ok">{fmtMs(post.ft_ms)}</span>
+        <span>Target rate</span>
+        <span className="text-mute">—</span>
+        <span className="text-ok">{report.target_rate_hz} Hz</span>
+      </div>
+
+      <div>
+        <div className="mb-1 text-[10px] uppercase tracking-wide text-mute">What changed</div>
+        <ul className="space-y-1 text-[10px] text-ink">
+          {report.changes.map((c) => (
+            <li key={c}>• {c}</li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="rounded border border-line bg-bg px-2 py-1.5 text-[10px] text-mute">
+        可随时切换时间轴对比未对齐 / 已对齐：
+        <div className="mt-1 flex gap-1">
+          <button
+            type="button"
+            onClick={onShowRaw}
+            className={`rounded border px-2 py-0.5 ${
+              timelineMode === "raw"
+                ? "border-warn bg-warn/10 text-warn"
+                : "border-line hover:border-accent"
+            }`}
+          >
+            Raw (未对齐)
+          </button>
+          <button
+            type="button"
+            onClick={onShowAligned}
+            className={`rounded border px-2 py-0.5 ${
+              timelineMode === "aligned"
+                ? "border-ok bg-ok/10 text-ok"
+                : "border-line hover:border-accent"
+            }`}
+          >
+            Aligned (已对齐)
+          </button>
+        </div>
       </div>
     </div>
   );
