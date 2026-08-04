@@ -1,0 +1,12 @@
+{
+  "project": "Connector Insertion PoC",
+  "dataset": "Trial_2026_08",
+  "episodes": [
+    "EP_0038",
+    "EP_0039",
+    "EP_0040",
+    "EP_0041",
+    "EP_0042"
+  ],
+  "primary_episode": "EP_0042"
+}

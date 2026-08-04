@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0b0f14;
+  --panel: #121820;
+  --line: #243041;
+  --ink: #e8eef6;
+  --mute: #8b9bb0;
+  --accent: #3db8a8;
+  --accent2: #2f9e90;
+  --ok: #22c55e;
+  --warn: #eab308;
+  --bad: #ef4444;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: radial-gradient(1200px 600px at 10% -10%, #15202b 0%, var(--bg) 55%);
+  color: var(--ink);
+  font-family: "Source Sans 3", "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}

@@ -1,0 +1,71 @@
+[
+  {
+    "repo_id": "lerobot/pusht",
+    "revision": "main",
+    "codebase_version": "v3.0",
+    "fps": 10,
+    "robot_type": "unknown",
+    "total_episodes_in_repo": 206,
+    "imported": [
+      {
+        "episode_id": "HF_lerobot_pusht_0000",
+        "episode_index": 0,
+        "duration_s": 16.0,
+        "frames": 161,
+        "success": false,
+        "task": "Push the T-shaped block onto the T-shaped target.",
+        "path": "/home/cymatt/Documents/repo/data_cleaning/sample_data/episodes/HF_lerobot_pusht_0000"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "repo_id": "lerobot/pusht",
+    "revision": "main",
+    "codebase_version": "v3.0",
+    "fps": 10,
+    "robot_type": "unknown",
+    "total_episodes_in_repo": 206,
+    "imported": [
+      {
+        "episode_id": "HF_lerobot_pusht_0000",
+        "episode_index": 0,
+        "duration_s": 16.0,
+        "frames": 161,
+        "success": null,
+        "task": "Push the T-shaped block onto the T-shaped target.",
+        "path": "/home/cymatt/Documents/repo/data_cleaning/sample_data/episodes/HF_lerobot_pusht_0000"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "repo_id": "lerobot/svla_so100_stacking",
+    "revision": "main",
+    "codebase_version": "v3.0",
+    "fps": 30,
+    "robot_type": "so100",
+    "total_episodes_in_repo": 56,
+    "imported": [
+      {
+        "episode_id": "HF_lerobot_svla_so100_stacking_0000",
+        "episode_index": 0,
+        "duration_s": 14.866666793823242,
+        "frames": 447,
+        "success": null,
+        "task": "Put the red cube on top of the blue cube.",
+        "path": "/app/sample_data/episodes/HF_lerobot_svla_so100_stacking_0000"
+      },
+      {
+        "episode_id": "HF_lerobot_svla_so100_stacking_0001",
+        "episode_index": 1,
+        "duration_s": 13.833333015441895,
+        "frames": 416,
+        "success": null,
+        "task": "Put the red cube on top of the blue cube.",
+        "path": "/app/sample_data/episodes/HF_lerobot_svla_so100_stacking_0001"
+      }
+    ],
+    "errors": []
+  }
+]

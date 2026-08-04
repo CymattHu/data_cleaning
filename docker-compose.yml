@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: sensorsync-backend
+    ports:
+      - "8000:8000"
+    environment:
+      SAMPLE_DATA_DIR: /app/sample_data
+      HF_HOME: /app/.cache/huggingface
+      # Optional: export HF_TOKEN=hf_xxx before compose up for gated datasets
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./sample_data:/app/sample_data
+      - hf_cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: sensorsync-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  hf_cache:

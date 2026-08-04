@@ -1,0 +1,11 @@
+**/node_modules
+**/.next
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.git
+**/dist
+**/.turbo
+**/exports
+frontend/README.md
+**/.DS_Store
